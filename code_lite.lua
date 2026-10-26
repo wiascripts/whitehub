@@ -1,4 +1,4 @@
--- WIA HUB v14 PAPER (бумажный стиль, бумажные звуки, фикс аимбота, новые функции)
+-- WIA HUB v16 PAPER (бумажный стиль, бумажные звуки, фикс аимбота, новые функции)
 -- Данные снайпера: wia_emotes.txt / wia_anims.txt / wia_anims_offsale.txt в workspace экзекьютора
 local BASE = "https://raw.githubusercontent.com/wiascripts/whitehub/main/"
 local SNIPER_DATA = setmetatable({}, {
@@ -1883,6 +1883,307 @@ do
     createSelector("Skeleton Color", colors, 1, function(c) S.skelColor = c end)
 end
 
+-- ========== VISUALS+ : небо, аура вокруг тебя, трейсеры выстрелов, эффекты мира ==========
+createSection("Sky & Time")
+local VX = {
+    auraColor = Color3.fromRGB(124, 92, 255), rainbow = false,
+    orbitN = 6, orbitR = 4, orbitSpd = 2,
+    tracerColor = Color3.fromRGB(124, 92, 255), tracerLife = 0.6, tracerWidth = 15, tracerOrigin = "Head",
+    time = 14, timeOn = false, tracers = false, tracerList = {},
+    invis = false, aura = false, orbit = false, trail = false, hl = false, ghost = false,
+}
+local vfx = {}
+local VXCOLORS = {
+    { "Purple", Color3.fromRGB(124, 92, 255) }, { "Red", Color3.fromRGB(235, 70, 70) }, { "Green", Color3.fromRGB(80, 220, 120) },
+    { "Blue", Color3.fromRGB(80, 150, 240) }, { "Yellow", Color3.fromRGB(240, 210, 80) }, { "White", Color3.fromRGB(250, 250, 250) },
+    { "Pink", Color3.fromRGB(245, 110, 190) }, { "Cyan", Color3.fromRGB(80, 230, 240) }, { "Orange", Color3.fromRGB(245, 140, 50) },
+}
+local function vxColor()
+    if VX.rainbow then return Color3.fromHSV(tick() % 5 / 5, 0.85, 1) end
+    return VX.auraColor
+end
+local function killer(list, extra)
+    local o = extra or {}
+    o.Destroy = function() for _, i in ipairs(list) do pcall(function() i:Destroy() end) end end
+    return o
+end
+
+-- ---- небо ----
+local SKY = {
+    sunset = { clock = 17.9, amb = Color3.fromRGB(130, 80, 70), out = Color3.fromRGB(200, 120, 90), atmo = Color3.fromRGB(255, 150, 90), dens = 0.38, haze = 1.6, stars = 0, shift = Color3.fromRGB(255, 130, 70) },
+    night = { clock = 0, amb = Color3.fromRGB(40, 45, 75), out = Color3.fromRGB(50, 60, 100), atmo = Color3.fromRGB(40, 50, 90), dens = 0.3, haze = 1, stars = 3000, shift = Color3.fromRGB(0, 0, 0) },
+    space = { clock = 0, amb = Color3.fromRGB(60, 50, 110), out = Color3.fromRGB(80, 60, 140), atmo = Color3.fromRGB(30, 20, 70), dens = 0.15, haze = 0, stars = 5000, shift = Color3.fromRGB(120, 60, 255) },
+    pink = { clock = 18.3, amb = Color3.fromRGB(170, 110, 160), out = Color3.fromRGB(230, 150, 200), atmo = Color3.fromRGB(255, 160, 210), dens = 0.4, haze = 1.8, stars = 800, shift = Color3.fromRGB(255, 140, 200) },
+    toxic = { clock = 15, amb = Color3.fromRGB(70, 130, 60), out = Color3.fromRGB(110, 190, 80), atmo = Color3.fromRGB(120, 230, 60), dens = 0.45, haze = 2.2, stars = 0, shift = Color3.fromRGB(120, 255, 60) },
+    blood = { clock = 0.5, amb = Color3.fromRGB(110, 30, 30), out = Color3.fromRGB(150, 40, 40), atmo = Color3.fromRGB(170, 30, 30), dens = 0.42, haze = 2, stars = 1500, shift = Color3.fromRGB(255, 40, 40) },
+    rainbow = { clock = 14, amb = Color3.fromRGB(150, 150, 150), out = Color3.fromRGB(180, 180, 180), atmo = Color3.fromRGB(255, 255, 255), dens = 0.4, haze = 1.5, stars = 0, shift = Color3.fromRGB(255, 255, 255), rainbow = true },
+}
+local function saveSky()
+    if VX.saved then return end
+    VX.saved = {
+        ClockTime = Lighting.ClockTime, Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient,
+        ColorShift_Top = Lighting.ColorShift_Top, ColorShift_Bottom = Lighting.ColorShift_Bottom,
+    }
+    local a = Lighting:FindFirstChildOfClass("Atmosphere")
+    if a then VX.savedAtmo = { a, a.Color, a.Decay, a.Density, a.Haze, a.Glare } end
+    local s = Lighting:FindFirstChildOfClass("Sky")
+    if s then VX.savedSky = { s, s.StarCount, s.CelestialBodiesShown } end
+end
+local function restoreSky()
+    VX.preset = nil
+    if VX.saved then
+        for k, v in pairs(VX.saved) do pcall(function() Lighting[k] = v end) end
+        VX.saved = nil
+    end
+    if VX.ownAtmo then pcall(function() VX.ownAtmo:Destroy() end) VX.ownAtmo = nil end
+    if VX.savedAtmo then
+        local t = VX.savedAtmo
+        pcall(function() t[1].Color, t[1].Decay, t[1].Density, t[1].Haze, t[1].Glare = t[2], t[3], t[4], t[5], t[6] end)
+        VX.savedAtmo = nil
+    end
+    if VX.ownSky then pcall(function() VX.ownSky:Destroy() end) VX.ownSky = nil end
+    if VX.savedSky then
+        local t = VX.savedSky
+        pcall(function() t[1].StarCount, t[1].CelestialBodiesShown = t[2], t[3] end)
+        VX.savedSky = nil
+    end
+end
+local function applySky(key)
+    local p = SKY[key]
+    if not p then restoreSky() return end
+    saveSky()
+    VX.preset = p
+    Lighting.Ambient, Lighting.OutdoorAmbient, Lighting.ColorShift_Top = p.amb, p.out, p.shift
+    local a = Lighting:FindFirstChildOfClass("Atmosphere")
+    if not a then a = Instance.new("Atmosphere") a.Parent = Lighting VX.ownAtmo = a end
+    a.Color, a.Density, a.Haze, a.Glare = p.atmo, p.dens, p.haze, 0.3
+    local s = Lighting:FindFirstChildOfClass("Sky")
+    if not s then s = Instance.new("Sky") s.Parent = Lighting VX.ownSky = s end
+    s.StarCount, s.CelestialBodiesShown = p.stars, true
+end
+createSelector("Sky Preset", {
+    { "Off", "off" }, { "Sunset", "sunset" }, { "Night", "night" }, { "Space", "space" },
+    { "Pink Dream", "pink" }, { "Toxic", "toxic" }, { "Blood Moon", "blood" }, { "Rainbow", "rainbow" },
+}, 1, function(k) applySky(k) end)
+createTumbler("Lock Time of Day", false).onToggle(function(st) VX.timeOn = st end)
+createSlider("Time of Day (0-24)", 0, 24, 14, function(v) VX.time = v end)
+
+-- ---- эффекты мира ----
+createSection("World Effects")
+local cc = Instance.new("ColorCorrectionEffect") cc.Name = "WiaCC" cc.Enabled = false cc.Parent = Lighting
+local bloom = Instance.new("BloomEffect") bloom.Name = "WiaBloom" bloom.Enabled = false bloom.Intensity = 1 bloom.Size = 24 bloom.Threshold = 0.8 bloom.Parent = Lighting
+local rays = Instance.new("SunRaysEffect") rays.Name = "WiaRays" rays.Enabled = false rays.Intensity = 0.25 rays.Spread = 1 rays.Parent = Lighting
+local expOrig = Lighting.ExposureCompensation
+createTumbler("Color Correction", false).onToggle(function(st) cc.Enabled = st end)
+createSlider("Saturation", -100, 100, 0, function(v) cc.Saturation = v / 100 end)
+createSlider("Contrast", -100, 100, 0, function(v) cc.Contrast = v / 100 end)
+createSlider("Screen Brightness", -50, 50, 0, function(v) cc.Brightness = v / 100 end)
+do
+    local tints = { { "None", Color3.new(1, 1, 1) } }
+    for _, c in ipairs(VXCOLORS) do tints[#tints + 1] = c end
+    createSelector("Screen Tint", tints, 1, function(c) cc.TintColor = c end)
+end
+createSlider("Exposure", -30, 30, 0, function(v) Lighting.ExposureCompensation = expOrig + v / 10 end)
+createTumbler("Bloom", false).onToggle(function(st) bloom.Enabled = st end)
+createSlider("Bloom Intensity %", 0, 300, 100, function(v) bloom.Intensity = v / 100 end)
+createTumbler("Sun Rays", false).onToggle(function(st) rays.Enabled = st end)
+createSlider("Sun Rays Intensity %", 0, 100, 25, function(v) rays.Intensity = v / 100 end)
+createSlider("Camera Max Zoom", 20, 1000, 128, function(v) pcall(function() LocalPlayer.CameraMaxZoomDistance = v end) end)
+
+-- ---- аура вокруг тебя ----
+createSection("Aura (around you)")
+createTumbler("Particle Aura", false).onToggle(function(st) VX.aura = st end)
+createTumbler("Orbiting Orbs", false).onToggle(function(st) VX.orbit = st end)
+createTumbler("Body Trail", false).onToggle(function(st) VX.trail = st end)
+createTumbler("Self Outline (Highlight)", false).onToggle(function(st) VX.hl = st end)
+createTumbler("Invisibility (только для тебя)", false).onToggle(function(st) VX.invis = st end)
+createTumbler("Ghost Body (ForceField)", false).onToggle(function(st) VX.ghost = st end)
+createTumbler("Rainbow Aura", false).onToggle(function(st) VX.rainbow = st end)
+createSelector("Aura Color", VXCOLORS, 1, function(c) VX.auraColor = c end)
+createSlider("Orbs Count", 2, 16, 6, function(v) VX.orbitN = v end)
+createSlider("Orbs Radius", 2, 12, 4, function(v) VX.orbitR = v end)
+createSlider("Orbs Speed", 1, 10, 2, function(v) VX.orbitSpd = v end)
+
+-- ---- трейсеры выстрелов ----
+createSection("Bullet Tracers")
+createTumbler("Bullet Tracers (on click)", false).onToggle(function(st) VX.tracers = st end)
+createSelector("Tracer Color", VXCOLORS, 1, function(c) VX.tracerColor = c end)
+createSelector("Tracer Origin", { { "Head", "Head" }, { "Body", "Body" }, { "Camera", "Camera" } }, 1, function(v) VX.tracerOrigin = v end)
+createSlider("Tracer Width", 5, 100, 15, function(v) VX.tracerWidth = v end)
+createSlider("Tracer Lifetime (x0.1s)", 2, 30, 6, function(v) VX.tracerLife = v / 10 end)
+
+local function spawnTracer()
+    local char, hrp = getChar()
+    if not char then return end
+    local origin
+    if VX.tracerOrigin == "Camera" then origin = Camera.CFrame.Position + Camera.CFrame.LookVector * 1.5 - Camera.CFrame.UpVector * 0.6
+    elseif VX.tracerOrigin == "Body" and hrp then origin = hrp.Position
+    else local h = char:FindFirstChild("Head") origin = h and h.Position or (hrp and hrp.Position) end
+    if not origin then return end
+    local m = UserInputService:GetMouseLocation()
+    local ur = Camera:ViewportPointToRay(m.X, m.Y)
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = { char }
+    local res = workspace:Raycast(ur.Origin, ur.Direction * 2000, rp)
+    local target = res and res.Position or (ur.Origin + ur.Direction * 500)
+    local function point(pos)
+        local p = Instance.new("Part")
+        p.Anchored, p.CanCollide, p.CanQuery, p.CanTouch = true, false, false, false
+        p.Transparency, p.Size, p.Position = 1, Vector3.new(0.1, 0.1, 0.1), pos
+        p.Parent = workspace
+        return p, Instance.new("Attachment", p)
+    end
+    local p0, a0 = point(origin)
+    local p1, a1 = point(target)
+    local b = Instance.new("Beam")
+    b.Attachment0, b.Attachment1 = a0, a1
+    b.Color = ColorSequence.new(vxColor() == VX.auraColor and VX.tracerColor or vxColor())
+    b.Width0, b.Width1 = VX.tracerWidth / 100, VX.tracerWidth / 100
+    b.LightEmission, b.LightInfluence, b.FaceCamera = 1, 0, true
+    b.Parent = p0
+    VX.tracerList[#VX.tracerList + 1] = { b = b, p0 = p0, p1 = p1, born = tick(), life = VX.tracerLife }
+end
+bind(UserInputService.InputBegan, function(i, gp)
+    if gp or S.unloaded or not VX.tracers then return end
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then pcall(spawnTracer) end
+end)
+
+-- ---- менеджер эффектов персонажа ----
+local function want(key, cond, build)
+    if cond and vfx[key] == nil then
+        local ok, o = pcall(build)
+        vfx[key] = ok and o or false
+    elseif not cond and vfx[key] ~= nil then
+        if vfx[key] then pcall(vfx[key].Destroy) end
+        vfx[key] = nil
+    end
+end
+local function clearFx()
+    for k, o in pairs(vfx) do if o then pcall(o.Destroy) end vfx[k] = nil end
+end
+bind(RunService.Heartbeat, function()
+    if S.unloaded then return end
+    local now = tick()
+    -- время и небо
+    local t = VX.timeOn and VX.time or (VX.preset and VX.preset.clock)
+    if t then Lighting.ClockTime = t end
+    if VX.preset and VX.preset.rainbow then
+        local col = Color3.fromHSV(now % 6 / 6, 0.7, 1)
+        local a = Lighting:FindFirstChildOfClass("Atmosphere")
+        if a then a.Color = col end
+        Lighting.ColorShift_Top = col
+    end
+    -- трейсеры: затухание
+    local tl = VX.tracerList
+    for i = #tl, 1, -1 do
+        local e = tl[i]
+        local a = (now - e.born) / e.life
+        if a >= 1 then
+            pcall(function() e.p0:Destroy() e.p1:Destroy() end)
+            table.remove(tl, i)
+        else
+            e.b.Transparency = NumberSequence.new(a)
+        end
+    end
+    -- эффекты на персонаже
+    local char, hrp = getChar()
+    if not char or not hrp then return end
+    if VX.lastChar ~= char then clearFx() VX.lastChar = char end
+    local c = vxColor()
+    want("aura", VX.aura, function()
+        local e = Instance.new("ParticleEmitter")
+        e.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+        e.Rate, e.Lifetime, e.Speed, e.SpreadAngle = 45, NumberRange.new(1, 2), NumberRange.new(2, 5), Vector2.new(360, 360)
+        e.LightEmission, e.Rotation, e.RotSpeed = 1, NumberRange.new(0, 360), NumberRange.new(-60, 60)
+        e.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0) })
+        e.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) })
+        e.Parent = hrp
+        return killer({ e }, { e = e })
+    end)
+    if vfx.aura then vfx.aura.e.Color = ColorSequence.new(c) end
+    want("trail", VX.trail, function()
+        local a0, a1 = Instance.new("Attachment", hrp), Instance.new("Attachment", hrp)
+        a0.Position, a1.Position = Vector3.new(0, 1.6, 0), Vector3.new(0, -1.6, 0)
+        local tr = Instance.new("Trail")
+        tr.Attachment0, tr.Attachment1, tr.Lifetime, tr.LightEmission = a0, a1, 0.7, 1
+        tr.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1) })
+        tr.Parent = hrp
+        return killer({ tr, a0, a1 }, { tr = tr })
+    end)
+    if vfx.trail then vfx.trail.tr.Color = ColorSequence.new(c) end
+    want("hl", VX.hl, function()
+        local h = Instance.new("Highlight")
+        h.FillTransparency, h.OutlineTransparency, h.DepthMode = 0.75, 0, Enum.HighlightDepthMode.AlwaysOnTop
+        h.Parent = char
+        return killer({ h }, { h = h })
+    end)
+    if vfx.hl then vfx.hl.h.FillColor, vfx.hl.h.OutlineColor = c, c end
+    want("ghost", VX.ghost, function()
+        local orig = {}
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") and p ~= hrp then
+                orig[p] = { p.Material, p.Color, p.Transparency }
+                p.Material = Enum.Material.ForceField
+            end
+        end
+        return { orig = orig, Destroy = function()
+            for p, o in pairs(orig) do pcall(function() p.Material, p.Color, p.Transparency = o[1], o[2], o[3] end) end
+        end }
+    end)
+    if vfx.ghost then
+        for p in pairs(vfx.ghost.orig) do if p.Parent then p.Color = c end end
+    end
+    want("invis", VX.invis, function()
+        local orig = {}
+        local o = { orig = orig, last = 0 }
+        function o.scan()
+            for _, d in ipairs(char:GetDescendants()) do
+                if (d:IsA("BasePart") or d:IsA("Decal")) and d ~= hrp and orig[d] == nil then
+                    orig[d] = d.Transparency
+                    d.Transparency = 1
+                end
+            end
+        end
+        o.Destroy = function()
+            for d, t in pairs(orig) do pcall(function() d.Transparency = t end) end
+        end
+        o.scan()
+        return o
+    end)
+    if vfx.invis and now - vfx.invis.last > 0.4 then vfx.invis.last = now pcall(vfx.invis.scan) end
+    -- орбы: пересборка при смене количества
+    if vfx.orbit and vfx.orbit.n ~= VX.orbitN then pcall(vfx.orbit.Destroy) vfx.orbit = nil end
+    want("orbit", VX.orbit, function()
+        local f = Instance.new("Folder") f.Name = "WiaOrbs" f.Parent = workspace
+        local parts = {}
+        for i = 1, VX.orbitN do
+            local p = Instance.new("Part")
+            p.Shape, p.Size, p.Material = Enum.PartType.Ball, Vector3.new(0.6, 0.6, 0.6), Enum.Material.Neon
+            p.Anchored, p.CanCollide, p.CanQuery, p.CanTouch, p.CastShadow = true, false, false, false, false
+            p.Parent = f
+            parts[i] = p
+        end
+        return killer({ f }, { parts = parts, n = VX.orbitN })
+    end)
+    if vfx.orbit then
+        local n, R = #vfx.orbit.parts, VX.orbitR
+        for i, p in ipairs(vfx.orbit.parts) do
+            local a = now * VX.orbitSpd + i * math.pi * 2 / n
+            p.Position = hrp.Position + Vector3.new(math.cos(a) * R, math.sin(now * 2 + i) * 0.8 + 0.4, math.sin(a) * R)
+            p.Color = VX.rainbow and Color3.fromHSV((now / 5 + i / n) % 1, 0.85, 1) or c
+        end
+    end
+end)
+
+S.visCleanup = function()
+    pcall(clearFx)
+    pcall(restoreSky)
+    for _, e in ipairs(VX.tracerList) do pcall(function() e.p0:Destroy() e.p1:Destroy() end) end
+    for _, o in ipairs({ cc, bloom, rays }) do pcall(function() o:Destroy() end) end
+    pcall(function() Lighting.ExposureCompensation = expOrig end)
+end
+
 -- ========== TAB: MOVE ==========
 createTab("Move")
 createSection("Flight")
@@ -2383,21 +2684,82 @@ do
     end)
 end
 
--- ========== TAB: SNIPER ==========
+-- ========== TAB: SNIPER (v15: новый дизайн, надёжная загрузка эмоций, избранное, история, эффекты) ==========
 do
     createTab("Sniper")
-    createSection("Catalog Sniper")
+    local page = currentPage
     local SNIPER_FILES = { emotes = "wia_emotes.txt", anims = "wia_anims.txt", offsale = "wia_anims_offsale.txt" }
-    local sniperData, sniperBusy, sniperEmoteCache = {}, false, {}
-    local SB
+    local FAV_FILE = "wia_sniper_fav.json"
+    local AFEM_URL = "https://raw.githubusercontent.com/Joystickplays/AFEM/refs/heads/main/emotes.json"
+    local ROWS = 30
+    local sniperData, sniperBusy, animCache = {}, false, {}
+    local SN = {
+        mode = "emotes", items = {}, page = 1, remote = false,
+        favs = {}, favSet = {}, hist = {},
+        cursors = { "" }, cidx = 1, nextCur = "", liveQ = "",
+        afem = nil, sort = 1, token = 0, partyIdx = 0, src = 1,
+    }
+    local ui = {}
+    S.snpInterval = 8
+    S.snpGhost = 0
 
+    -- ---------- helpers ----------
+    local function httpGet(url)
+        local ok, r = pcall(function() return game:HttpGet(url) end)
+        if ok and type(r) == "string" and #r > 0 then return r end
+        local req = (syn and syn.request) or (http and http.request) or http_request or request
+        if req then
+            local ok2, res = pcall(req, { Url = url, Method = "GET" })
+            if ok2 and type(res) == "table" and type(res.Body) == "string" and (res.StatusCode == nil or res.StatusCode == 200) then
+                return res.Body
+            end
+        end
+        return nil
+    end
+    local function digitsOf(s) return tostring(s or ""):match("(%d+)") end
+    local function keyOf(e) return tostring(e.id) .. ":" .. tostring(e.kind or "emotes") end
+    local function setStatus(msg, col)
+        if ui.status then ui.status.Text = tostring(msg) ui.status.TextColor3 = col or T.dim end
+        if ui.dot then ui.dot.BackgroundColor3 = col or T.dim end
+    end
+
+    -- ---------- favorites ----------
+    local function saveFavs()
+        if not writefile then return end
+        pcall(function() writefile(FAV_FILE, HttpService:JSONEncode(SN.favs)) end)
+    end
+    local function loadFavs()
+        if not (isfile and readfile) then return end
+        pcall(function()
+            if not isfile(FAV_FILE) then return end
+            local d = HttpService:JSONDecode(readfile(FAV_FILE))
+            if type(d) ~= "table" then return end
+            for _, e in ipairs(d) do
+                if type(e) == "table" and e.id and e.name then
+                    e.low = string.lower(tostring(e.name))
+                    SN.favs[#SN.favs + 1] = e
+                    SN.favSet[keyOf(e)] = true
+                end
+            end
+        end)
+    end
+    loadFavs()
+
+    -- ---------- data files ----------
     local function parseSniper(mode, text)
+        text = text:gsub("^\239\187\191", "")
         local list, n, i = {}, 0, 0
+        local first = text:match("[^\n]+") or ""
+        local sep = "\t"
+        if not first:find("\t", 1, true) then
+            sep = first:find("|", 1, true) and "|" or (first:find(";", 1, true) and ";" or ",")
+        end
         for line in string.gmatch(text, "[^\n]+") do
             i += 1
-            local f = string.split((line:gsub("\r", "")), "\t")
-            if #f >= 2 then
-                local e = { id = f[1], name = f[2], low = string.lower(f[2]) }
+            local f = string.split((line:gsub("\r", "")), sep)
+            local id = f[1] and f[1]:match("%d+")
+            if id and f[2] and f[2] ~= "" then
+                local e = { id = id, name = f[2], low = string.lower(f[2]), kind = mode }
                 if mode ~= "emotes" and #f >= 9 then e.items = { f[3], f[4], f[5], f[6], f[7], f[8], f[9] } end
                 n += 1
                 list[n] = e
@@ -2407,20 +2769,50 @@ do
         return list
     end
     local function ensureData(mode)
-        if sniperData[mode] then return true end
+        if sniperData[mode] then return #sniperData[mode] > 0 end
         local file = SNIPER_FILES[mode]
-        SB.status("Загрузка " .. file .. "...")
+        if not file then return false end
+        setStatus("Загрузка " .. file .. "…", T.dim)
         local text = SNIPER_DATA[mode]
-        if not text then SB.status("Данные " .. file .. " не найдены (положи в workspace экзекьютора)", T.err) return false end
-        sniperData[mode] = parseSniper(mode, text)
+        if not text then
+            local r = httpGet(BASE .. file)
+            if r and #r > 100 then
+                text = r
+                if writefile then pcall(writefile, file, r) end
+            end
+        end
+        if not text then return false end
+        local list = parseSniper(mode, text)
+        if #list == 0 then return false end
+        sniperData[mode] = list
         return true
     end
+    local function loadAfem()
+        if SN.afem then return SN.afem end
+        local body = httpGet(AFEM_URL)
+        local list = {}
+        pcall(function()
+            local d = HttpService:JSONDecode(body or "[]")
+            for _, e in ipairs(d) do
+                local id = e.id and tostring(e.id):match("%d+")
+                local nm = e.name or e.title
+                if id and nm then
+                    list[#list + 1] = {
+                        id = id, name = tostring(nm), low = string.lower(tostring(nm)), kind = "emotes",
+                        anim = digitsOf(e.animationid or e.animationId or e.AnimationId),
+                    }
+                end
+            end
+        end)
+        SN.afem = list
+        return list
+    end
 
+    -- ---------- animation resolving (несколько способов, чтобы эмоции грузились) ----------
     local function loadAssetObjects(assetId)
         local ok, objs = pcall(function() return game:GetObjects("rbxassetid://" .. tostring(assetId)) end)
         if ok and type(objs) == "table" and #objs > 0 then return objs end
     end
-    local function digitsOf(s) return tostring(s or ""):match("(%d+)") end
     local function collectAnimations(objs)
         local out = {}
         for _, o in ipairs(objs) do
@@ -2429,29 +2821,145 @@ do
         end
         return out
     end
-    local function resolveEmoteAnim(assetId)
-        if sniperEmoteCache[assetId] then return sniperEmoteCache[assetId] end
+    local function resolveCandidates(assetId)
+        assetId = tostring(assetId)
+        if animCache[assetId] then return animCache[assetId] end
+        local out, seen = {}, {}
+        local function add(id)
+            if id and not seen[id] then seen[id] = true out[#out + 1] = "rbxassetid://" .. id end
+        end
+        -- 1) GetObjects
         local objs = loadAssetObjects(assetId)
         if objs then
-            for _, a in ipairs(collectAnimations(objs)) do
-                local id = digitsOf(a.AnimationId)
-                if id then sniperEmoteCache[assetId] = "rbxassetid://" .. id break end
-            end
+            for _, a in ipairs(collectAnimations(objs)) do add(digitsOf(a.AnimationId)) end
             for _, o in ipairs(objs) do pcall(function() o:Destroy() end) end
-            if sniperEmoteCache[assetId] then return sniperEmoteCache[assetId] end
         end
-        local animId
-        pcall(function()
-            local delivery = HttpService:JSONDecode(game:HttpGet("https://assetdelivery.roblox.com/v1/assetId/" .. tostring(assetId)))
-            if delivery and delivery.location then
-                local content = game:HttpGet(delivery.location)
-                local raw = content:match("rbxassetid://(%d+)") or content:match("[?&]id=(%d+)")
-                if raw then animId = "rbxassetid://" .. raw end
+        -- 2) InsertService
+        if #out == 0 then
+            pcall(function()
+                local m = InsertService:LoadAsset(tonumber(assetId))
+                if m then
+                    for _, a in ipairs(collectAnimations({ m })) do add(digitsOf(a.AnimationId)) end
+                    m:Destroy()
+                end
+            end)
+        end
+        -- 3) assetdelivery v2 / v1
+        if #out == 0 then
+            for _, url in ipairs({
+                "https://assetdelivery.roblox.com/v2/assetId/" .. assetId,
+                "https://assetdelivery.roblox.com/v1/assetId/" .. assetId,
+            }) do
+                local body = httpGet(url)
+                if body then
+                    local loc
+                    pcall(function()
+                        local d = HttpService:JSONDecode(body)
+                        loc = d.location or (d.locations and d.locations[1] and d.locations[1].location)
+                    end)
+                    if loc then
+                        local content = httpGet(loc)
+                        if content then
+                            for id in content:gmatch("rbxassetid://(%d+)") do add(id) end
+                            for id in content:gmatch("[?&]id=(%d+)") do add(id) end
+                        end
+                    end
+                end
+                if #out > 0 then break end
             end
-        end)
-        if animId then sniperEmoteCache[assetId] = animId end
-        return animId
+        end
+        -- 4) крайний случай: сам ID ассета как анимация
+        add(assetId)
+        animCache[assetId] = out
+        return out
     end
+
+    -- ---------- playback ----------
+    local cur = { track = nil, name = nil, frozen = false }
+    local function npUpdate()
+        if not ui.npName then return end
+        ui.npName.Text = cur.name and ("▶  " .. cur.name) or "Ничего не играет"
+        ui.npName.TextColor3 = cur.name and T.text or T.dim
+        if ui.loopBtn then
+            ui.loopBtn.BackgroundColor3 = S.emoteLoop and T.accent or T.rowd
+            ui.loopBtn.TextColor3 = S.emoteLoop and T.onAccent or T.text
+        end
+        if ui.spdLbl then ui.spdLbl.Text = tostring(S.emoteSpeed or 100) .. "%" end
+    end
+    local function applyMine()
+        if cur.track then
+            pcall(function()
+                cur.track.Looped = S.emoteLoop and true or false
+                cur.track:AdjustSpeed(cur.frozen and 0 or ((S.emoteSpeed or 100) / 100))
+            end)
+        end
+        npUpdate()
+    end
+    local function stopMine()
+        if cur.track then
+            pcall(function() cur.track:Stop(0.15) end)
+            pcall(function() cur.track:Destroy() end)
+        end
+        cur.track, cur.name, cur.frozen = nil, nil, false
+        npUpdate()
+    end
+    local function tryPlay(animId, name)
+        local _, _, hum = getChar()
+        if not hum then return false end
+        pcall(stopCurrentEmote)
+        stopMine()
+        local animator = hum:FindFirstChildOfClass("Animator") or new("Animator", {}, hum)
+        local a = new("Animation", { Name = "WIASniper", AnimationId = animId })
+        local ok, track = pcall(function() return animator:LoadAnimation(a) end)
+        if not ok or not track then pcall(function() a:Destroy() end) return false end
+        local t0 = os.clock()
+        while track.Length <= 0 and os.clock() - t0 < 3 do task.wait(0.05) end
+        if track.Length <= 0 then pcall(function() track:Destroy() end) return false end
+        track.Priority = Enum.AnimationPriority.Action
+        track.Looped = S.emoteLoop and true or false
+        if not pcall(function() track:Play(0.15, 1, (S.emoteSpeed or 100) / 100) end) then
+            pcall(function() track:Destroy() end)
+            return false
+        end
+        cur.track, cur.name, cur.frozen = track, name, false
+        track.Stopped:Connect(function()
+            if cur.track == track then cur.track, cur.name, cur.frozen = nil, nil, false npUpdate() end
+        end)
+        npUpdate()
+        return true
+    end
+    local function addHist(e)
+        for i = #SN.hist, 1, -1 do if keyOf(SN.hist[i]) == keyOf(e) then table.remove(SN.hist, i) end end
+        table.insert(SN.hist, 1, e)
+        while #SN.hist > 60 do table.remove(SN.hist) end
+    end
+    local function playEmote(entry)
+        if sniperBusy then return end
+        sniperBusy = true
+        setStatus("Загрузка: " .. entry.name .. "…", T.dim)
+        task.spawn(function()
+            local ok, err = pcall(function()
+                local cands = {}
+                if entry.anim then cands[1] = "rbxassetid://" .. entry.anim end
+                for _, c in ipairs(resolveCandidates(entry.id)) do cands[#cands + 1] = c end
+                local played = false
+                for _, aid in ipairs(cands) do
+                    if tryPlay(aid, entry.name) then played = true break end
+                end
+                if played then
+                    addHist(entry)
+                    setStatus("▶ " .. entry.name, T.ok)
+                else
+                    setStatus("Не удалось загрузить анимацию (недоступна / нет GetObjects)", T.err)
+                    notify("Эмоут не загрузился", "error")
+                end
+            end)
+            if not ok then setStatus("Ошибка: " .. tostring(err), T.err) end
+            sniperBusy = false
+        end)
+    end
+
+    -- ---------- bundles (анимации-паки) ----------
     local function slotByName(n)
         if n:find("swimidle", 1, true) then return "SwimIdle" end
         if n:find("swim", 1, true) then return "Swim" end
@@ -2469,96 +2977,560 @@ do
         if not slot and inst.Parent then slot = slotByName(string.lower(inst.Parent.Name)) end
         return slot
     end
-
-    local function playSniperEmote(entry)
-        if sniperBusy then return end
-        sniperBusy = true
-        SB.status("Загрузка эмоута: " .. entry.name .. "...")
-        task.spawn(function()
-            local animId = resolveEmoteAnim(entry.id)
-            if animId then
-                if playWiaEmote(animId, entry.name) then SB.status("Playing: " .. entry.name, T.ok)
-                else SB.status("Не удалось проиграть", T.err) end
-            else
-                SB.status("Не удалось получить анимацию (нужен GetObjects / HttpGet)", T.err)
-            end
-            sniperBusy = false
-        end)
-    end
-
-    local function applySniperBundle(entry)
+    local function applyBundle(entry)
         if sniperBusy or not entry.items then return end
         local key = "Sniper: " .. entry.name .. " #" .. entry.id
         if PACKS[key] then
             task.spawn(applyPack, key)
-            SB.status("Анимация: " .. entry.name, T.ok)
+            addHist(entry)
+            setStatus("Анимация: " .. entry.name, T.ok)
             return
         end
         sniperBusy = true
-        SB.status("Загрузка пака: " .. entry.name .. "...")
+        setStatus("Загрузка пака: " .. entry.name .. "…", T.dim)
         task.spawn(function()
-            local pack, found, idleN = {}, 0, 0
-            for _, assetId in ipairs(entry.items) do
-                local objs = loadAssetObjects(assetId)
-                if objs then
-                    for _, a in ipairs(collectAnimations(objs)) do
-                        local id = digitsOf(a.AnimationId)
-                        if id then
-                            local slot = classifyAnim(a)
-                            if slot == "IDLE" then idleN += 1 slot = "Animation" .. math.min(idleN, 2) end
-                            if slot and not pack[slot] then pack[slot] = id found += 1 end
+            local ok, err = pcall(function()
+                local pack, found, idleN = {}, 0, 0
+                for _, assetId in ipairs(entry.items) do
+                    local objs = loadAssetObjects(assetId)
+                    if objs then
+                        for _, a in ipairs(collectAnimations(objs)) do
+                            local id = digitsOf(a.AnimationId)
+                            if id then
+                                local slot = classifyAnim(a)
+                                if slot == "IDLE" then idleN += 1 slot = "Animation" .. math.min(idleN, 2) end
+                                if slot and not pack[slot] then pack[slot] = id found += 1 end
+                            end
                         end
+                        for _, o in ipairs(objs) do pcall(function() o:Destroy() end) end
                     end
-                    for _, o in ipairs(objs) do pcall(function() o:Destroy() end) end
+                    task.wait()
                 end
-                task.wait()
-            end
-            if found > 0 then
-                PACKS[key] = pack
-                applyPack(key)
-                SB.status("Анимация: " .. entry.name .. " (" .. found .. " слотов)", T.ok)
+                if found > 0 then
+                    PACKS[key] = pack
+                    applyPack(key)
+                    addHist(entry)
+                    setStatus("Анимация: " .. entry.name .. " (" .. found .. " слотов)", T.ok)
+                else
+                    setStatus("Пак не загрузился (оффсейл / нет GetObjects)", T.err)
+                    notify("Пак не загрузился", "error")
+                end
+            end)
+            if not ok then setStatus("Ошибка: " .. tostring(err), T.err) end
+            sniperBusy = false
+        end)
+    end
+    local function activate(e)
+        if e.items then applyBundle(e) else playEmote(e) end
+    end
+
+    -- ---------- results rendering ----------
+    local rows, handlers = {}, {}
+    local render
+    local function toggleFav(e)
+        local k = keyOf(e)
+        if SN.favSet[k] then
+            SN.favSet[k] = nil
+            for i = #SN.favs, 1, -1 do if keyOf(SN.favs[i]) == k then table.remove(SN.favs, i) end end
+            setStatus("Убрано из избранного", T.dim)
+        else
+            SN.favSet[k] = true
+            SN.favs[#SN.favs + 1] = { id = e.id, name = e.name, low = e.low, kind = e.kind or "emotes", items = e.items, anim = e.anim }
+            setStatus("♥ В избранном: " .. e.name, T.ok)
+        end
+        saveFavs()
+        render()
+    end
+    local function smallBtn(parent, text, xOff, accent)
+        local b = new("TextButton", {
+            Size = UDim2.new(0, 28, 0, 28), Position = UDim2.new(1, xOff, 0.5, -14), Text = text,
+            TextColor3 = accent and T.onAccent or T.dim, TextSize = 13, Font = Enum.Font.GothamBold,
+            BackgroundColor3 = accent and T.accent or T.rowd, BorderSizePixel = 0, ZIndex = 3,
+        }, parent)
+        if accent then ref(b, "BackgroundColor3") end
+        addCorner(b, 7)
+        return b
+    end
+    local function getRow(i)
+        local r = rows[i]
+        if r then return r end
+        local f = new("Frame", { Size = UDim2.new(1, -2, 0, 40), BackgroundColor3 = T.row, BorderSizePixel = 0, LayoutOrder = i, Visible = false }, ui.results)
+        addCorner(f, 8) hover(f)
+        addStroke(f, T.stroke, 1, 0.6)
+        local bar = new("Frame", { Size = UDim2.new(0, 3, 1, -14), Position = UDim2.new(0, 6, 0, 7), BorderSizePixel = 0 }, f)
+        ref(bar, "BackgroundColor3") addCorner(bar, 2, true)
+        local name = new("TextLabel", { Size = UDim2.new(1, -124, 0, 18), Position = UDim2.new(0, 17, 0, 4), BackgroundTransparency = 1, Text = "", TextColor3 = T.text, TextSize = 12, Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }, f)
+        local sub = new("TextLabel", { Size = UDim2.new(1, -124, 0, 14), Position = UDim2.new(0, 17, 0, 22), BackgroundTransparency = 1, Text = "", TextColor3 = T.dim, TextSize = 10, Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }, f)
+        local body = new("TextButton", { Size = UDim2.new(1, -108, 1, 0), BackgroundTransparency = 1, Text = "", ZIndex = 2 }, f)
+        local playB = smallBtn(f, "▶", -36, true)
+        local favB = smallBtn(f, "♡", -68)
+        local copyB = smallBtn(f, "⧉", -100)
+        local function click() local it = handlers[i] if it then sfx("tap") activate(it) end end
+        body.MouseButton1Click:Connect(click)
+        playB.MouseButton1Click:Connect(click)
+        favB.MouseButton1Click:Connect(function() local it = handlers[i] if it then sfx("tap") toggleFav(it) end end)
+        copyB.MouseButton1Click:Connect(function()
+            local it = handlers[i]
+            if it and setclipboard then setclipboard(tostring(it.id)) notify("ID скопирован: " .. it.id, "success") end
+        end)
+        r = { f = f, name = name, sub = sub, fav = favB }
+        rows[i] = r
+        return r
+    end
+    render = function()
+        local total = #SN.items
+        local pages = math.max(1, math.ceil(total / ROWS))
+        SN.page = math.clamp(SN.page, 1, pages)
+        local from = (SN.page - 1) * ROWS
+        for i = 1, ROWS do
+            local it = SN.items[from + i]
+            local r = getRow(i)
+            if it then
+                local isFav = SN.favSet[keyOf(it)]
+                handlers[i] = it
+                r.name.Text = tostring(it.name)
+                r.sub.Text = "#" .. tostring(it.id) .. (it.items and "  ·  пак анимаций" or "  ·  эмоут")
+                r.fav.Text = isFav and "♥" or "♡"
+                r.fav.TextColor3 = isFav and T.err or T.dim
+                r.f.Visible = true
             else
-                SB.status("Пак не загрузился (оффсейл/нет GetObjects)", T.err)
-                notify("Пак не загрузился", "error")
+                handlers[i] = nil
+                r.f.Visible = false
             end
+        end
+        ui.results.CanvasPosition = Vector2.zero
+        ui.empty.Visible = total == 0
+        ui.count.Text = tostring(total)
+        if SN.remote then
+            ui.prev.Visible = SN.cidx > 1
+            ui.next.Visible = SN.nextCur ~= ""
+            ui.pageLbl.Text = "стр. " .. SN.cidx
+        else
+            ui.prev.Visible = SN.page > 1
+            ui.next.Visible = SN.page < pages
+            ui.pageLbl.Text = total > 0 and (SN.page .. " / " .. pages) or ""
+        end
+    end
+    local function sortItems(list)
+        if SN.sort == 2 then table.sort(list, function(a, b) return a.low < b.low end)
+        elseif SN.sort == 3 then table.sort(list, function(a, b) return a.low > b.low end)
+        elseif SN.sort == 4 then table.sort(list, function(a, b) return (tonumber(a.id) or 0) > (tonumber(b.id) or 0) end) end
+    end
+
+    -- ---------- live catalog ----------
+    local function liveUrl(q, cursor)
+        local url = q ~= "" and ("https://catalog.roblox.com/v1/search/items/details?Category=12&SortType=Relevance&IncludeNotForSale=true&Limit=30&Keyword=" .. HttpService:UrlEncode(q))
+            or "https://catalog.roblox.com/v1/search/items/details?Category=12&SortType=Updated&IncludeNotForSale=true&Limit=30"
+        if cursor and cursor ~= "" then url ..= "&cursor=" .. HttpService:UrlEncode(cursor) end
+        return url
+    end
+    local function fetchLive(reset, dir)
+        if sniperBusy then return end
+        if reset then
+            SN.liveQ = trim(ui.search.Text) SN.cursors = { "" } SN.cidx = 1 SN.nextCur = ""
+        elseif dir == "next" then
+            if SN.nextCur == "" then return end
+            SN.cidx += 1 SN.cursors[SN.cidx] = SN.nextCur
+        elseif dir == "prev" then
+            if SN.cidx <= 1 then return end
+            SN.cidx -= 1
+        end
+        sniperBusy = true
+        SN.remote = true
+        setStatus("Запрос каталога Roblox…", T.dim)
+        task.spawn(function()
+            local ok = pcall(function()
+                local body = httpGet(liveUrl(SN.liveQ, SN.cursors[SN.cidx] or ""))
+                local d = body and HttpService:JSONDecode(body)
+                if type(d) ~= "table" then setStatus("Каталог не ответил — попробуй ещё раз", T.err) return end
+                local items = {}
+                for _, e in ipairs(d.data or {}) do
+                    if e.id and e.name then
+                        items[#items + 1] = { id = tostring(e.id), name = tostring(e.name), low = string.lower(tostring(e.name)), kind = "emotes" }
+                    end
+                end
+                SN.nextCur = d.nextPageCursor or ""
+                SN.items, SN.page = items, 1
+                render()
+                setStatus(#items > 0 and ("LIVE · стр. " .. SN.cidx .. " · " .. #items .. " шт.") or "Ничего не найдено", #items > 0 and T.ok or T.dim)
+            end)
+            if not ok then setStatus("Ошибка запроса каталога", T.err) end
             sniperBusy = false
         end)
     end
 
+    local setMode
     local function runSearch(q, mode)
+        mode = mode or SN.mode
+        if mode == "live" then fetchLive(true) return end
         if sniperBusy then return end
         sniperBusy = true
+        SN.remote = false
+        local fallback = false
         task.spawn(function()
-            if not ensureData(mode) then sniperBusy = false return end
-            q = string.lower(q or "")
-            local list = sniperData[mode]
-            local out, n = {}, 0
-            for i = 1, #list do
-                local e = list[i]
-                if q == "" or e.id == q or string.find(e.low, q, 1, true) then n += 1 out[n] = e end
-                if i % 30000 == 0 then task.wait() end
-            end
-            SB.setItems(out)
-            SB.status(n > 0 and (string.upper(mode) .. " · " .. n .. " найдено") or "Ничего не найдено", n > 0 and T.ok or T.dim)
+            local ok, err = pcall(function()
+                local list
+                if mode == "afem" then setStatus("Загрузка AFEM…", T.dim) list = loadAfem()
+                elseif mode == "fav" then list = SN.favs
+                elseif mode == "hist" then list = SN.hist
+                elseif ensureData(mode) then list = sniperData[mode] end
+                if (not list or #list == 0) and (mode == "emotes" or mode == "anims" or mode == "offsale" or mode == "afem") then
+                    fallback = true
+                    return
+                end
+                q = string.lower(q or "")
+                local out, n = {}, 0
+                for i = 1, #(list or {}) do
+                    local e = list[i]
+                    if q == "" or e.id == q or string.find(e.low or "", q, 1, true) then n += 1 out[n] = e end
+                    if i % 30000 == 0 then task.wait() end
+                end
+                sortItems(out)
+                SN.items, SN.page = out, 1
+                render()
+                setStatus(n > 0 and (string.upper(mode) .. " · " .. n .. " найдено") or "Ничего не найдено", n > 0 and T.ok or T.dim)
+            end)
             sniperBusy = false
+            if not ok then setStatus("Ошибка: " .. tostring(err), T.err) end
+            if fallback then
+                setStatus("Файл данных не найден — открываю LIVE-каталог", T.err)
+                setMode("live", true)
+            end
         end)
     end
+    setMode = function(m, fire)
+        SN.mode = m
+        for k, b in pairs(ui.modeBtns) do
+            local on = k == m
+            TweenService:Create(b, TweenInfo.new(0.12), { BackgroundColor3 = on and T.accent or T.row, TextColor3 = on and T.onAccent or T.text }):Play()
+        end
+        if fire then runSearch(trim(ui.search.Text), m) end
+    end
 
-    SB = createBrowser({
-        modes = { { "emotes", "EMOTES" }, { "anims", "ANIMS" }, { "offsale", "OFFSALE" } },
-        placeholder = "Название или ID...",
-        label = function(e) return e.name .. "  ·  " .. e.id end,
-        onClick = function(e, mode) if mode == "emotes" then playSniperEmote(e) else applySniperBundle(e) end end,
-        onMode = function(m) runSearch(SB.query(), m) end,
-        onSearch = function(q, m) runSearch(q, m) end,
-    })
-    SB.status("Выбери режим или нажми Search")
+    -- ---------- UI: header ----------
+    do
+        local head = new("Frame", { Size = UDim2.new(1, 0, 0, 62), BackgroundColor3 = T.row, BorderSizePixel = 0 }, page)
+        addCorner(head, 10) addStroke(head, T.stroke, 1, 0.3)
+        local stripe = new("Frame", { Size = UDim2.new(0, 5, 1, -16), Position = UDim2.new(0, 8, 0, 8), BorderSizePixel = 0 }, head)
+        ref(stripe, "BackgroundColor3") addCorner(stripe, 3, true)
+        new("TextLabel", { Size = UDim2.new(1, -120, 0, 24), Position = UDim2.new(0, 22, 0, 8), BackgroundTransparency = 1, Text = "🎯  Catalog Sniper", TextColor3 = T.text, TextSize = 16, Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Left }, head)
+        new("TextLabel", { Size = UDim2.new(1, -120, 0, 24), Position = UDim2.new(0, 22, 0, 32), BackgroundTransparency = 1, Text = "Эмоции и анимации · ▶ сыграть · ♡ в избранное · ⧉ копировать ID", TextColor3 = T.dim, TextSize = 10, Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }, head)
+        local chip = new("Frame", { Size = UDim2.new(0, 70, 0, 38), Position = UDim2.new(1, -80, 0.5, -19), BorderSizePixel = 0 }, head)
+        ref(chip, "BackgroundColor3") addCorner(chip, 10)
+        ui.count = new("TextLabel", { Size = UDim2.new(1, 0, 0, 22), Position = UDim2.new(0, 0, 0, 2), BackgroundTransparency = 1, Text = "0", TextColor3 = T.onAccent, TextSize = 16, Font = Enum.Font.GothamBold }, chip)
+        new("TextLabel", { Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 0, 22), BackgroundTransparency = 1, Text = "найдено", TextColor3 = T.onAccent, TextTransparency = 0.2, TextSize = 9, Font = Enum.Font.Gotham }, chip)
+    end
 
-    createButton("Стоп эмоут", function() if stopCurrentEmote() then notify("Эмоут остановлен") end end)
+    -- ---------- UI: search ----------
+    do
+        local row = new("Frame", { Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1 }, page)
+        local boxBg = new("Frame", { Size = UDim2.new(1, -78, 1, 0), BackgroundColor3 = T.row, BorderSizePixel = 0 }, row)
+        addCorner(boxBg, 9) addStroke(boxBg, T.stroke, 1, 0.3)
+        ui.search = new("TextBox", { Size = UDim2.new(1, -40, 1, 0), Position = UDim2.new(0, 12, 0, 0), BackgroundTransparency = 1, Text = "", PlaceholderText = "🔍  Название или ID…", PlaceholderColor3 = T.dim, TextColor3 = T.text, TextSize = 12, Font = Enum.Font.Gotham, ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left }, boxBg)
+        local clear = new("TextButton", { Size = UDim2.new(0, 24, 0, 24), Position = UDim2.new(1, -30, 0.5, -12), Text = "✕", TextColor3 = T.dim, BackgroundColor3 = T.rowd, TextSize = 11, Font = Enum.Font.GothamBold, BorderSizePixel = 0 }, boxBg)
+        addCorner(clear, 6)
+        local go = new("TextButton", { Size = UDim2.new(0, 70, 1, 0), Position = UDim2.new(1, -70, 0, 0), Text = "Search", TextColor3 = T.onAccent, TextSize = 12, Font = Enum.Font.GothamBold, BorderSizePixel = 0 }, row)
+        ref(go, "BackgroundColor3") addCorner(go, 9)
+        go.MouseButton1Click:Connect(function() sfx("tap") runSearch(trim(ui.search.Text), SN.mode) end)
+        ui.search.FocusLost:Connect(function(enter) if enter then runSearch(trim(ui.search.Text), SN.mode) end end)
+        clear.MouseButton1Click:Connect(function() ui.search.Text = "" runSearch("", SN.mode) end)
+    end
+
+    -- ---------- UI: mode pills ----------
+    do
+        local scroller = new("ScrollingFrame", { Size = UDim2.new(1, 0, 0, 32), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 0, AutomaticCanvasSize = Enum.AutomaticSize.X, CanvasSize = UDim2.new(0, 0, 0, 0), ScrollingDirection = Enum.ScrollingDirection.X }, page)
+        new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, VerticalAlignment = Enum.VerticalAlignment.Center }, scroller)
+        ui.modeBtns = {}
+        local modes = {
+            { "emotes", "😀 EMOTES" }, { "anims", "🏃 ANIMS" }, { "offsale", "🚫 OFFSALE" }, { "live", "🌐 LIVE" },
+            { "afem", "💃 AFEM" }, { "fav", "♥ ИЗБРАННОЕ" }, { "hist", "🕘 ИСТОРИЯ" },
+        }
+        for i, m in ipairs(modes) do
+            local b = new("TextButton", { Size = UDim2.new(0, (utf8.len(m[2]) or #m[2]) * 8 + 22, 0, 28), Text = m[2], TextColor3 = T.text, TextSize = 11, Font = Enum.Font.GothamBold, BackgroundColor3 = T.row, BorderSizePixel = 0, AutoButtonColor = false, LayoutOrder = i }, scroller)
+            addCorner(b, 14, true) addStroke(b, T.stroke, 1, 0.5)
+            b.MouseButton1Click:Connect(function() sfx("flip") setMode(m[1], true) end)
+            ui.modeBtns[m[1]] = b
+        end
+    end
+
+    -- ---------- UI: results ----------
+    do
+        ui.results = new("ScrollingFrame", { Size = UDim2.new(1, 0, 0, 300), BackgroundColor3 = T.panel, BackgroundTransparency = 0.1, BorderSizePixel = 0, ScrollBarThickness = 3, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(0, 0, 0, 0) }, page)
+        ref(ui.results, "ScrollBarImageColor3") addCorner(ui.results, 10) addStroke(ui.results, T.stroke, 1, 0.3)
+        new("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6), PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, ui.results)
+        new("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, ui.results)
+        ui.empty = new("TextLabel", { Size = UDim2.new(1, 0, 0, 60), BackgroundTransparency = 1, Text = "Пусто 🍃\nВыбери режим или нажми Search", TextColor3 = T.dim, TextSize = 12, Font = Enum.Font.Gotham, LayoutOrder = -1 }, ui.results)
+
+        local pager = new("Frame", { Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1 }, page)
+        local function nav(text, pos)
+            local b = new("TextButton", { Size = UDim2.new(0, 90, 1, 0), Position = pos, Text = text, TextColor3 = T.text, TextSize = 11, Font = Enum.Font.GothamBold, BackgroundColor3 = T.row, BorderSizePixel = 0, Visible = false }, pager)
+            addCorner(b, 8) addStroke(b, T.stroke, 1, 0.5)
+            return b
+        end
+        ui.prev, ui.next = nav("‹  Назад", UDim2.new(0, 0, 0, 0)), nav("Далее  ›", UDim2.new(1, -90, 0, 0))
+        ui.pageLbl = new("TextLabel", { Size = UDim2.new(1, -190, 1, 0), Position = UDim2.new(0, 95, 0, 0), BackgroundTransparency = 1, Text = "", TextColor3 = T.dim, TextSize = 11, Font = Enum.Font.GothamBold }, pager)
+        ui.prev.MouseButton1Click:Connect(function()
+            sfx("flip")
+            if SN.remote then fetchLive(false, "prev") else SN.page -= 1 render() end
+        end)
+        ui.next.MouseButton1Click:Connect(function()
+            sfx("flip")
+            if SN.remote then fetchLive(false, "next") else SN.page += 1 render() end
+        end)
+
+        local st = new("Frame", { Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1 }, page)
+        ui.dot = new("Frame", { Size = UDim2.new(0, 8, 0, 8), Position = UDim2.new(0, 4, 0.5, -4), BackgroundColor3 = T.dim, BorderSizePixel = 0 }, st)
+        addCorner(ui.dot, 4, true)
+        ui.status = new("TextLabel", { Size = UDim2.new(1, -20, 1, 0), Position = UDim2.new(0, 18, 0, 0), BackgroundTransparency = 1, Text = "Загрузка…", TextColor3 = T.dim, TextSize = 10, Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }, st)
+    end
+
+    -- ---------- UI: now playing ----------
+    do
+        local np = new("Frame", { Size = UDim2.new(1, 0, 0, 78), BackgroundColor3 = T.row, BorderSizePixel = 0 }, page)
+        addCorner(np, 10) addStroke(np, T.stroke, 1, 0.3)
+        ui.npName = new("TextLabel", { Size = UDim2.new(1, -20, 0, 26), Position = UDim2.new(0, 12, 0, 6), BackgroundTransparency = 1, Text = "Ничего не играет", TextColor3 = T.dim, TextSize = 13, Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }, np)
+        local function pill(text, x, w)
+            local b = new("TextButton", { Size = UDim2.new(0, w, 0, 30), Position = UDim2.new(0, x, 0, 40), Text = text, TextColor3 = T.text, TextSize = 11, Font = Enum.Font.GothamBold, BackgroundColor3 = T.rowd, BorderSizePixel = 0 }, np)
+            addCorner(b, 8)
+            return b
+        end
+        local stopB = pill("⏹ Стоп", 10, 78)
+        ui.loopBtn = pill("🔁 Loop", 94, 78)
+        local minus = pill("−", 190, 30)
+        ui.spdLbl = new("TextLabel", { Size = UDim2.new(0, 54, 0, 30), Position = UDim2.new(0, 222, 0, 40), BackgroundTransparency = 1, Text = "100%", TextColor3 = T.text, TextSize = 12, Font = Enum.Font.GothamBold }, np)
+        local plus = pill("+", 278, 30)
+        stopB.MouseButton1Click:Connect(function() sfx("tap") pcall(stopCurrentEmote) stopMine() setStatus("Остановлено", T.dim) end)
+        ui.loopBtn.MouseButton1Click:Connect(function() sfx("tap") S.emoteLoop = not S.emoteLoop applyMine() end)
+        minus.MouseButton1Click:Connect(function() sfx("tap") S.emoteSpeed = math.max(10, (S.emoteSpeed or 100) - 10) applyMine() end)
+        plus.MouseButton1Click:Connect(function() sfx("tap") S.emoteSpeed = math.min(300, (S.emoteSpeed or 100) + 10) applyMine() end)
+        npUpdate()
+    end
+
+    -- ---------- старые кнопки (сохранены) ----------
+    createButton("Стоп эмоут", function() pcall(stopMine) if stopCurrentEmote() then notify("Эмоут остановлен") end end)
     createButton("Сбросить анимацию (респавн)", function()
         local _, _, hum = getChar()
         if hum then hum.Health = 0 end
     end)
+
+    -- ---------- новые функции ----------
+    createSection("Список и порядок")
+    createSelector("Сортировка", { { "Как в файле", 1 }, { "A → Z", 2 }, { "Z → A", 3 }, { "Новые (ID ↓)", 4 } }, 1, function(v)
+        SN.sort = v
+        if not SN.remote then sortItems(SN.items) SN.page = 1 render() end
+    end)
+    createSelector("Источник для рандома", { { "Текущий список", 1 }, { "Избранное", 2 }, { "Все эмоуты", 3 } }, 1, function(v) SN.src = v end)
+
+    local function pickRandom(sequential)
+        local list
+        if SN.src == 2 then list = SN.favs
+        elseif SN.src == 3 then if ensureData("emotes") then list = sniperData.emotes end
+        else list = SN.items end
+        if (not list or #list == 0) and ensureData("emotes") then list = sniperData.emotes end
+        if not list or #list == 0 then return nil end
+        if sequential then
+            SN.partyIdx = (SN.partyIdx % #list) + 1
+            return list[SN.partyIdx]
+        end
+        return list[math.random(#list)]
+    end
+
+    createSection("Фан")
+    createButton("🎲 Случайный эмоут", function()
+        task.spawn(function()
+            local e = pickRandom(false)
+            if e then activate(e) else notify("Нет данных — открой LIVE или положи файлы", "error") end
+        end)
+    end)
+    createButton("🧊 Заморозить позу (вкл/выкл)", function()
+        if not cur.track then notify("Сначала включи эмоут", "error") return end
+        cur.frozen = not cur.frozen
+        applyMine()
+        notify(cur.frozen and "Поза заморожена" or "Поза разморожена")
+    end)
+    createSlider("Интервал авто-смены, сек", 3, 30, 8, function(v) S.snpInterval = v end)
+    createTumbler("🔀 Авто-смена эмоутов", false).onToggle(function(st)
+        S.snpAuto = st
+        SN.token += 1
+        local my = SN.token
+        if not st then return end
+        task.spawn(function()
+            while S.snpAuto and SN.token == my and not S.unloaded do
+                local e = pickRandom(false)
+                if e then
+                    while sniperBusy and S.snpAuto and SN.token == my do task.wait(0.1) end
+                    activate(e)
+                end
+                local t0 = os.clock()
+                while os.clock() - t0 < (S.snpInterval or 8) and S.snpAuto and SN.token == my and not S.unloaded do task.wait(0.2) end
+            end
+        end)
+    end)
+    createTumbler("💃 Танцевальная вечеринка (по очереди)", false).onToggle(function(st)
+        S.snpParty = st
+        SN.token += 1
+        local my = SN.token
+        if not st then return end
+        task.spawn(function()
+            while S.snpParty and SN.token == my and not S.unloaded do
+                local e = pickRandom(true)
+                if e then
+                    while sniperBusy and S.snpParty and SN.token == my do task.wait(0.1) end
+                    activate(e)
+                end
+                local t0 = os.clock()
+                while os.clock() - t0 < (S.snpInterval or 8) and S.snpParty and SN.token == my and not S.unloaded do task.wait(0.2) end
+            end
+        end)
+    end)
+
+    createSection("Избранное и история")
+    createButton("📋 Копировать ID текущего эмоута", function()
+        local id
+        if cur.track and cur.track.Animation then id = digitsOf(cur.track.Animation.AnimationId) end
+        if id and setclipboard then setclipboard(id) notify("ID скопирован: " .. id, "success") else notify("Нет активного эмоута", "error") end
+    end)
+    createButton("📤 Экспорт избранного в буфер", function()
+        if not setclipboard then notify("setclipboard недоступен", "error") return end
+        local lines = {}
+        for _, e in ipairs(SN.favs) do lines[#lines + 1] = e.id .. "\t" .. e.name end
+        setclipboard(table.concat(lines, "\n"))
+        notify("Скопировано: " .. #lines .. " шт.", "success")
+    end)
+    createButton("🧹 Очистить историю", function() SN.hist = {} if SN.mode == "hist" then SN.items = {} render() end notify("История очищена") end)
+    createButton("💔 Очистить избранное", function()
+        SN.favs, SN.favSet = {}, {}
+        saveFavs()
+        if SN.mode == "fav" then SN.items = {} end
+        render()
+        notify("Избранное очищено")
+    end)
+
+    -- ---------- эффекты (локальные: видны только тебе) ----------
+    createSection("Эффекты (виден только тебе)")
+    local ghostOrig = setmetatable({}, { __mode = "k" })
+    local colorOrig = setmetatable({}, { __mode = "k" })
+    local function applyGhost()
+        local char = LocalPlayer.Character
+        if not char then return end
+        local a = (S.snpGhost or 0) / 100
+        for _, d in ipairs(char:GetDescendants()) do
+            if (d:IsA("BasePart") and d.Name ~= "HumanoidRootPart") or d:IsA("Decal") then
+                if ghostOrig[d] == nil then ghostOrig[d] = d.Transparency end
+                d.Transparency = a > 0 and math.max(ghostOrig[d], a) or ghostOrig[d]
+            end
+        end
+    end
+    local function setAura(on)
+        local _, root = getChar()
+        if not root then return end
+        local old = root:FindFirstChild("WIAAura")
+        if old then old:Destroy() end
+        if not on then return end
+        new("ParticleEmitter", {
+            Name = "WIAAura", Rate = 35, Lifetime = NumberRange.new(0.8, 1.6), Speed = NumberRange.new(1, 4),
+            SpreadAngle = Vector2.new(180, 180), LightEmission = 0.7,
+            Color = ColorSequence.new(T.accent, Color3.fromRGB(255, 255, 255)),
+            Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.5), NumberSequenceKeypoint.new(1, 0) }),
+            Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1) }),
+            Texture = "rbxasset://textures/particles/sparkles_main.dds",
+        }, root)
+    end
+    local function setTrail(on)
+        local _, root = getChar()
+        if not root then return end
+        for _, n in ipairs({ "WIATrail", "WIATrailA0", "WIATrailA1" }) do
+            local o = root:FindFirstChild(n)
+            if o then o:Destroy() end
+        end
+        if not on then return end
+        local a0 = new("Attachment", { Name = "WIATrailA0", Position = Vector3.new(0, 1, 0) }, root)
+        local a1 = new("Attachment", { Name = "WIATrailA1", Position = Vector3.new(0, -1, 0) }, root)
+        new("Trail", {
+            Name = "WIATrail", Attachment0 = a0, Attachment1 = a1, Lifetime = 0.7, LightEmission = 0.8,
+            Color = ColorSequence.new(T.accent, Color3.fromRGB(255, 255, 255)), Transparency = NumberSequence.new(0.1, 1),
+        }, root)
+    end
+    local function restoreColors()
+        for k, v in pairs(colorOrig) do if k.Parent then k.Color = v end end
+        table.clear(colorOrig)
+    end
+
+    createSlider("👻 Призрак (прозрачность тела), %", 0, 90, 0, function(v) S.snpGhost = v applyGhost() end)
+    createTumbler("🌈 Радужное тело", false).onToggle(function(st)
+        S.snpRB = st
+        if not st then restoreColors() end
+    end)
+    createTumbler("✨ Аура частиц", false).onToggle(function(st) S.snpAura = st setAura(st) end)
+    createTumbler("☄️ Светящийся след", false).onToggle(function(st) S.snpTrail = st setTrail(st) end)
+    createSlider("Дистанция кино-камеры", 4, 25, 9, function(v) S.snpOrbitDist = v end)
+    createTumbler("🎥 Кино-камера (облёт вокруг тебя)", false).onToggle(function(st)
+        S.snpOrbit = st
+        if not st then
+            pcall(function()
+                Camera.CameraType = Enum.CameraType.Custom
+                local _, _, hum = getChar()
+                if hum then Camera.CameraSubject = hum end
+            end)
+        else
+            pcall(function() Camera.CameraType = Enum.CameraType.Scriptable end)
+        end
+    end)
+
+    local tick = 0
+    bind(RunService.RenderStepped, function()
+        if S.unloaded then return end
+        tick += 1
+        if S.snpRB and tick % 3 == 0 then
+            local char = LocalPlayer.Character
+            if char then
+                local c = Color3.fromHSV((os.clock() * 0.25) % 1, 0.8, 1)
+                for _, d in ipairs(char:GetDescendants()) do
+                    if d:IsA("BasePart") then
+                        if colorOrig[d] == nil then colorOrig[d] = d.Color end
+                        d.Color = c
+                    end
+                end
+            end
+        end
+        if S.snpOrbit then
+            local _, root = getChar()
+            if root then
+                local ang = os.clock() * 0.6
+                local dist = S.snpOrbitDist or 9
+                local pos = root.Position + Vector3.new(math.cos(ang) * dist, 3, math.sin(ang) * dist)
+                Camera.CFrame = CFrame.new(pos, root.Position + Vector3.new(0, 1.5, 0))
+            end
+        end
+    end)
+    bind(LocalPlayer.CharacterAdded, function()
+        task.wait(1)
+        if S.unloaded then return end
+        cur.track, cur.name, cur.frozen = nil, nil, false
+        npUpdate()
+        applyGhost()
+        if S.snpAura then setAura(true) end
+        if S.snpTrail then setTrail(true) end
+    end)
+
+    S.sniperCleanup = function()
+        S.snpAuto, S.snpParty, S.snpRB, S.snpGhost = false, false, false, 0
+        if S.snpOrbit then
+            S.snpOrbit = false
+            pcall(function() Camera.CameraType = Enum.CameraType.Custom end)
+        end
+        pcall(applyGhost)
+        pcall(setAura, false)
+        pcall(setTrail, false)
+        pcall(restoreColors)
+        pcall(stopMine)
+    end
+
+    -- ---------- старт: сразу показываем список ----------
+    setMode("emotes", false)
+    setStatus("Загрузка списка эмоций…", T.dim)
+    render()
+    task.spawn(function() runSearch("", "emotes") end)
 end
 
 -- ========== UNLOAD ==========
@@ -2570,6 +3542,8 @@ local function unload()
     pcall(function() if SND.folder then SND.folder:Destroy() end end)
     pcall(function() LocalPlayer.CameraMaxZoomDistance = 128 LocalPlayer.CameraMinZoomDistance = 0.5 end)
     pcall(stopFlight)
+    if S.sniperCleanup then pcall(S.sniperCleanup) end
+    if S.visCleanup then pcall(S.visCleanup) end
     pcall(restoreHitboxes)
     pcall(removeChams)
     pcall(removeTPTool)
@@ -2653,7 +3627,7 @@ createButton("Выгрузить хаб (Unload)", function()
     task.delay(0.4, unload)
 end)
 
-notify("WIA HUB v14 PAPER загружен · звуки: " .. (SND.custom and "бумага" or "загрузка…"), "success")
+notify("WIA HUB v16 PAPER загружен · звуки: " .. (SND.custom and "бумага" or "загрузка…"), "success")
 sfx("flip")
 
 end
